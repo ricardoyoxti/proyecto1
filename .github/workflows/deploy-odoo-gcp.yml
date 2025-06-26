@@ -65,11 +65,27 @@ jobs:
         echo "BASE_NAME=$BASE_NAME" >> $GITHUB_OUTPUT
         echo "🏗️ Nombre de instancia generado: $INSTANCE_NAME"
 
+    - name: 🔍 Verify startup script exists
+      run: |
+        if [ ! -f "startup-script.sh" ]; then
+          echo "❌ Error: startup-script.sh no encontrado en el directorio raíz"
+          exit 1
+        fi
+        echo "✅ startup-script.sh encontrado"
+        echo "📁 Directorio actual: $(pwd)"
+        echo "📋 Contenido del directorio:"
+        ls -la
+        echo "📄 Primeras líneas del startup-script.sh:"
+        head -5 startup-script.sh
+
     - name: 🖥️ Create VM Instance
       run: |
         INSTANCE_NAME="${{ steps.generate_name.outputs.INSTANCE_NAME }}"
         
         echo "🏗️ Creando instancia: $INSTANCE_NAME"
+        echo "📁 Directorio de trabajo: $(pwd)"
+        echo "📄 Verificando startup-script.sh: $(ls -la startup-script.sh)"
+        
         gcloud compute instances create $INSTANCE_NAME \
           --project=${{ env.PROJECT_ID }} \
           --zone=${{ github.event.inputs.zone }} \
@@ -129,7 +145,33 @@ jobs:
           --target-tags=odoo-server \
           --description="Allow SSH access" || echo "SSH firewall rule already exists"
 
-    - name: 📊 Get instance details
+    - name: ⏳ Wait for startup script to complete
+      run: |
+        INSTANCE_NAME="${{ steps.generate_name.outputs.INSTANCE_NAME }}"
+        echo "⏳ Esperando a que complete el startup script..."
+        
+        # Esperar hasta 15 minutos para que complete la instalación
+        for i in {1..30}; do
+          echo "🔍 Verificando progreso... (intento $i/30)"
+          
+          # Verificar si Odoo está respondiendo
+          EXTERNAL_IP=$(gcloud compute instances describe $INSTANCE_NAME --zone=${{ github.event.inputs.zone }} --format="get(networkInterfaces[0].accessConfigs[0].natIP)")
+          
+          if curl -s --connect-timeout 5 http://$EXTERNAL_IP:8069 > /dev/null 2>&1; then
+            echo "✅ Odoo está respondiendo!"
+            break
+          fi
+          
+          if [ $i -eq 30 ]; then
+            echo "⚠️ Timeout esperando a Odoo. Verificar logs manualmente."
+            echo "🔧 Comando para ver logs: gcloud compute ssh $INSTANCE_NAME --zone=${{ github.event.inputs.zone }} --command='sudo tail -f /var/log/startup-script.log'"
+          else
+            echo "⏳ Odoo aún no está listo. Esperando 30 segundos..."
+            sleep 30
+          fi
+        done
+
+    - name: 📊 Get instance details and debugging info
       run: |
         INSTANCE_NAME="${{ steps.generate_name.outputs.INSTANCE_NAME }}"
         echo "🎉 Instancia creada exitosamente!"
@@ -156,12 +198,18 @@ jobs:
         echo "SSH: gcloud compute ssh $INSTANCE_NAME --zone=${{ github.event.inputs.zone }}"
         
         echo ""
-        echo "⏳ La instalación de Odoo puede tardar entre 5-10 minutos después de que la instancia esté ejecutándose."
         echo "📋 Credenciales por defecto:"
         echo "  - Database: odoo"
         echo "  - User: admin"
         echo "  - Password: admin"
         
         echo ""
-        echo "🗑️ Para eliminar la instancia:"
+        echo "🔧 Comandos de debugging:"
+        echo "Ver logs startup: gcloud compute ssh $INSTANCE_NAME --zone=${{ github.event.inputs.zone }} --command='sudo tail -f /var/log/startup-script.log'"
+        echo "Ver logs Odoo: gcloud compute ssh $INSTANCE_NAME --zone=${{ github.event.inputs.zone }} --command='sudo tail -f /var/log/odoo/odoo.log'"
+        echo "Estado servicio: gcloud compute ssh $INSTANCE_NAME --zone=${{ github.event.inputs.zone }} --command='sudo systemctl status odoo'"
+        
+        echo ""
+        echo "🗑️ Para eliminar instancia y firewall:"
         echo "gcloud compute instances delete $INSTANCE_NAME --zone=${{ github.event.inputs.zone }}"
+        echo "gcloud compute firewall-rules delete allow-odoo-${{ github.run_number }} --quiet"
