@@ -1,0 +1,146 @@
+# .github/workflows/deploy-odoo-gcp.yml
+name: 🚀 Deploy Odoo 18 to Google Cloud
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_name:
+        description: 'Nombre base de la instancia (se añadirá timestamp único)'
+        required: false
+        default: 'odoo'
+      auto_generate_name:
+        description: 'Generar nombre único automáticamente'
+        required: false
+        default: true
+        type: boolean
+      machine_type:
+        description: 'Tipo de máquina'
+        required: true
+        default: 'e2-standard-2'
+        type: choice
+        options:
+        - 'e2-micro'
+        - 'e2-small'
+        - 'e2-medium'
+        - 'e2-standard-2'
+        - 'e2-standard-4'
+      zone:
+        description: 'Zona de GCP'
+        required: true
+        default: 'us-central1-a'
+      disk_size:
+        description: 'Tamaño del disco (GB)'
+        required: true
+        default: '20'
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    - name: 🔐 Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+    - name: ☁️ Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+
+    - name: 🖥️ Create VM Instance
+      run: |
+        # Validar nombre de instancia (solo letras minúsculas, números y guiones)
+        INSTANCE_NAME="${{ github.event.inputs.instance_name }}"
+        if [[ ! $INSTANCE_NAME =~ ^[a-z0-9-]+$ ]]; then
+          echo "❌ Error: El nombre de la instancia solo puede contener letras minúsculas, números y guiones"
+          exit 1
+        fi
+        
+        echo "🏗️ Creando instancia: $INSTANCE_NAME"
+        gcloud compute instances create $INSTANCE_NAME \
+          --project=${{ env.PROJECT_ID }} \
+          --zone=${{ github.event.inputs.zone }} \
+          --machine-type=${{ github.event.inputs.machine_type }} \
+          --network-interface=network-tier=PREMIUM,stack-type=IPV4_ONLY,subnet=default \
+          --maintenance-policy=MIGRATE \
+          --provisioning-model=STANDARD \
+          --service-account=${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }} \
+          --scopes=https://www.googleapis.com/auth/devstorage.read_only,https://www.googleapis.com/auth/logging.write,https://www.googleapis.com/auth/monitoring.write,https://www.googleapis.com/auth/servicecontrol,https://www.googleapis.com/auth/service.management.readonly,https://www.googleapis.com/auth/trace.append \
+          --tags=odoo-server,http-server,https-server \
+          --create-disk=auto-delete=yes,boot=yes,device-name=$INSTANCE_NAME,image=projects/ubuntu-os-cloud/global/images/ubuntu-2004-focal-v20231213,mode=rw,size=${{ github.event.inputs.disk_size }},type=projects/${{ env.PROJECT_ID }}/zones/${{ github.event.inputs.zone }}/diskTypes/pd-balanced \
+          --no-shielded-secure-boot \
+          --shielded-vtpm \
+          --shielded-integrity-monitoring \
+          --labels=environment=production,application=odoo,created-by=github-actions \
+          --reservation-affinity=any \
+          --metadata-from-file startup-script=startup-script.sh \
+          --metadata instance-name=$INSTANCE_NAME
+
+    - name: 🔥 Create firewall rules
+      run: |
+        # Regla para Odoo (puerto 8069)
+        gcloud compute firewall-rules create allow-odoo \
+          --project=${{ env.PROJECT_ID }} \
+          --direction=INGRESS \
+          --priority=1000 \
+          --network=default \
+          --action=ALLOW \
+          --rules=tcp:8069 \
+          --source-ranges=0.0.0.0/0 \
+          --target-tags=odoo-server \
+          --description="Allow Odoo access on port 8069" || echo "Firewall rule already exists"
+        
+        # Regla para SSH (si no existe)
+        gcloud compute firewall-rules create allow-ssh \
+          --project=${{ env.PROJECT_ID }} \
+          --direction=INGRESS \
+          --priority=1000 \
+          --network=default \
+          --action=ALLOW \
+          --rules=tcp:22 \
+          --source-ranges=0.0.0.0/0 \
+          --target-tags=odoo-server \
+          --description="Allow SSH access" || echo "SSH firewall rule already exists"
+
+    - name: 📊 Get instance details
+      run: |
+        INSTANCE_NAME="${{ steps.generate_name.outputs.INSTANCE_NAME }}"
+        echo "🎉 Instancia creada exitosamente!"
+        echo "📍 Detalles de la instancia:"
+        gcloud compute instances describe $INSTANCE_NAME \
+          --zone=${{ github.event.inputs.zone }} \
+          --format="table(name,status,machineType.basename(),scheduling.preemptible.yesno(yes='Yes',no='No'):label=PREEMPTIBLE,networkInterfaces[0].accessConfigs[0].natIP:label=EXTERNAL_IP,disks[0].diskSizeGb)"
+        
+        echo ""
+        echo "🌐 IP Externa:"
+        EXTERNAL_IP=$(gcloud compute instances describe $INSTANCE_NAME --zone=${{ github.event.inputs.zone }} --format="get(networkInterfaces[0].accessConfigs[0].natIP)")
+        echo "IP: $EXTERNAL_IP"
+        
+        echo ""
+        echo "🏷️ Información del despliegue:"
+        echo "Nombre generado: $INSTANCE_NAME"
+        echo "Nombre base: ${{ steps.generate_name.outputs.BASE_NAME }}"
+        echo "Desplegado por: ${{ github.actor }}"
+        echo "Fecha: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+        
+        echo ""
+        echo "🔗 URLs de acceso:"
+        echo "Odoo: http://$EXTERNAL_IP:8069"
+        echo "SSH: gcloud compute ssh $INSTANCE_NAME --zone=${{ github.event.inputs.zone }}"
+        
+        echo ""
+        echo "⏳ La instalación de Odoo puede tardar entre 5-10 minutos después de que la instancia esté ejecutándose."
+        echo "📋 Credenciales por defecto:"
+        echo "  - Database: odoo"
+        echo "  - User: admin"
+        echo "  - Password: admin"
+        
+        echo ""
+        echo "🗑️ Para eliminar la instancia:"
+        echo "gcloud compute instances delete $INSTANCE_NAME --zone=${{ github.event.inputs.zone }}"
