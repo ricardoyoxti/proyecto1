@@ -142,4 +142,11 @@ log "⚠️ La base de datos ya existe o no fue necesaria la inicialización."
 
 # Mostrar IP pública
 EXTERNAL_IP=$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H "Metadata-Flavor: Google")
-log "🎉 Odoo está disponible en: http://$EXTERNAL_IP:$OD_
+log "🎉 Odoo está disponible en: http://$EXTERNAL_IP:$ODOO_PORT"
+
+info "📊 Información de instalación:"
+info "   - Instancia: $INSTANCE_NAME"
+info "   - Fecha: $DEPLOYMENT_TIME"
+info "   - GitHub Actor: $GITHUB_ACTOR"
+info "   - Usuario Odoo: admin"
+info "   - Contraseña: admin"
