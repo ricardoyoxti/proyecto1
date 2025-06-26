@@ -84,7 +84,6 @@ apt-get install -y \
     unzip \
     fontconfig \
     libfontconfig1 \
-    wkhtmltopdf \
     xfonts-75dpi \
     xfonts-base
 
@@ -105,12 +104,20 @@ sudo -u postgres psql -c "ALTER USER $POSTGRES_USER CREATEDB;"
 log "👤 Creando usuario del sistema para Odoo..."
 adduser --system --home=$ODOO_HOME --group $ODOO_USER
 
-# Instalar wkhtmltopdf (versión específica recomendada)
+# Instalar wkhtmltopdf (versión compatible con Ubuntu 22.04)
 log "📄 Instalando wkhtmltopdf..."
 cd /tmp
-wget https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-2/wkhtmltox_0.12.6.1-2.jammy_amd64.deb
-dpkg -i wkhtmltox_0.12.6.1-2.jammy_amd64.deb || apt-get install -f -y
-dpkg -i wkhtmltox_0.12.6.1-2.jammy_amd64.deb
+# Detectar versión de Ubuntu y usar el paquete correcto
+if [[ $(lsb_release -rs) == "22.04" ]]; then
+    wget https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-2/wkhtmltox_0.12.6.1-2.jammy_amd64.deb
+    dpkg -i wkhtmltox_0.12.6.1-2.jammy_amd64.deb || apt-get install -f -y
+    dpkg -i wkhtmltox_0.12.6.1-2.jammy_amd64.deb
+else
+    # Para Ubuntu 20.04
+    wget https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-2/wkhtmltox_0.12.6.1-2.focal_amd64.deb
+    dpkg -i wkhtmltox_0.12.6.1-2.focal_amd64.deb || apt-get install -f -y
+    dpkg -i wkhtmltox_0.12.6.1-2.focal_amd64.deb
+fi
 
 # Descargar Odoo 18
 log "📥 Descargando Odoo 18 Community..."
@@ -240,8 +247,13 @@ info "   - Detener: sudo systemctl stop odoo"
 info "   - Reiniciar: sudo systemctl restart odoo"
 info "   - Estado: sudo systemctl status odoo"
 
-# Crear script de información
-cat > /home/ubuntu/odoo-info.sh << EOF
+# Crear script de información (compatible con usuario ubuntu en Ubuntu 22.04)
+MAIN_USER="ubuntu"
+if ! id "$MAIN_USER" &>/dev/null; then
+    MAIN_USER="admin"
+fi
+
+cat > /home/$MAIN_USER/odoo-info.sh << EOF
 #!/bin/bash
 echo "🔍 INFORMACIÓN DE ODOO 18"
 echo "========================"
@@ -261,8 +273,8 @@ echo "🗑️ ELIMINAR INSTANCIA:"
 echo "gcloud compute instances delete $INSTANCE_NAME --zone=\$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/zone -H 'Metadata-Flavor: Google' | cut -d/ -f4)"
 EOF
 
-chmod +x /home/ubuntu/odoo-info.sh
-chown ubuntu:ubuntu /home/ubuntu/odoo-info.sh
+chmod +x /home/$MAIN_USER/odoo-info.sh
+chown $MAIN_USER:$MAIN_USER /home/$MAIN_USER/odoo-info.sh
 
 log "✨ ¡Todo listo! Puedes acceder a Odoo en unos minutos."
 log "💡 Tip: Ejecuta ./odoo-info.sh para ver la información de acceso"
