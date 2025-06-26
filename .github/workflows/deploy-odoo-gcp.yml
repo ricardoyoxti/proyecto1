@@ -8,11 +8,6 @@ on:
         description: 'Nombre base de la instancia (se añadirá timestamp único)'
         required: false
         default: 'odoo'
-      auto_generate_name:
-        description: 'Generar nombre único automáticamente'
-        required: false
-        default: true
-        type: boolean
       machine_type:
         description: 'Tipo de máquina'
         required: true
@@ -53,14 +48,26 @@ jobs:
     - name: ☁️ Set up Cloud SDK
       uses: google-github-actions/setup-gcloud@v1
 
-    - name: 🖥️ Create VM Instance
+    - name: 🏷️ Generate instance name
+      id: generate_name
       run: |
+        BASE_NAME="${{ github.event.inputs.instance_name }}"
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        INSTANCE_NAME="${BASE_NAME}-${TIMESTAMP}"
+        
         # Validar nombre de instancia (solo letras minúsculas, números y guiones)
-        INSTANCE_NAME="${{ github.event.inputs.instance_name }}"
         if [[ ! $INSTANCE_NAME =~ ^[a-z0-9-]+$ ]]; then
           echo "❌ Error: El nombre de la instancia solo puede contener letras minúsculas, números y guiones"
           exit 1
         fi
+        
+        echo "INSTANCE_NAME=$INSTANCE_NAME" >> $GITHUB_OUTPUT
+        echo "BASE_NAME=$BASE_NAME" >> $GITHUB_OUTPUT
+        echo "🏗️ Nombre de instancia generado: $INSTANCE_NAME"
+
+    - name: 🖥️ Create VM Instance
+      run: |
+        INSTANCE_NAME="${{ steps.generate_name.outputs.INSTANCE_NAME }}"
         
         echo "🏗️ Creando instancia: $INSTANCE_NAME"
         gcloud compute instances create $INSTANCE_NAME \
@@ -80,11 +87,21 @@ jobs:
           --labels=environment=production,application=odoo,created-by=github-actions \
           --reservation-affinity=any \
           --metadata-from-file startup-script=startup-script.sh \
-          --metadata instance-name=$INSTANCE_NAME
+          --metadata instance-name=$INSTANCE_NAME,deployment-time=$(date -u +"%Y-%m-%dT%H:%M:%SZ"),github-actor=${{ github.actor }}
 
     - name: 🔥 Create firewall rules
       run: |
         # Regla para Odoo (puerto 8069)
+        gcloud compute firewall-rules create allow-odoo-${{ github.run_number }} \
+          --project=${{ env.PROJECT_ID }} \
+          --direction=INGRESS \
+          --priority=1000 \
+          --network=default \
+          --action=ALLOW \
+          --rules=tcp:8069 \
+          --source-ranges=0.0.0.0/0 \
+          --target-tags=odoo-server \
+          --description="Allow Odoo access on port 8069" || \
         gcloud compute firewall-rules create allow-odoo \
           --project=${{ env.PROJECT_ID }} \
           --direction=INGRESS \
