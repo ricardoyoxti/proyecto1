@@ -173,6 +173,11 @@ else
     exit 1
 fi
 
+# Instalar dependencias Python adicionales a nivel de sistema
+log "🐍 Instalando dependencias Python adicionales..."
+pip3 install --upgrade pip
+pip3 install rjsmin psycopg2-binary
+
 # Clonar Odoo con mejor manejo
 log "📥 Clonando Odoo $ODOO_VERSION..."
 if [ -d "$ODOO_HOME" ]; then
@@ -215,6 +220,10 @@ sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install --upgrade pip setuptools wh
 # Instalar psycopg2-binary primero
 log "🐘 Instalando psycopg2-binary..."
 sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install psycopg2-binary
+
+# Instalar rjsmin en el entorno virtual de Odoo
+log "🔧 Instalando rjsmin en entorno virtual de Odoo..."
+sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install rjsmin
 
 # Instalar dependencias de Python con mejor manejo de errores
 log "📦 Instalando dependencias Python..."
@@ -266,6 +275,7 @@ if ! sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install \
         "XlsxWriter"
         "xlwt"
         "zeep"
+        "rjsmin"
     )
     
     for dep in "${CRITICAL_DEPS[@]}"; do
@@ -277,6 +287,15 @@ if ! sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install \
     log "📦 Instalando lxml_html_clean..."
     sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install lxml_html_clean || warn "Falló la instalación de lxml_html_clean"
     
+fi
+
+# Verificar que rjsmin esté instalado correctamente
+log "🔍 Verificando instalación de rjsmin..."
+if sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/python" -c "import rjsmin; print('rjsmin instalado correctamente')" 2>/dev/null; then
+    log "✅ rjsmin verificado correctamente"
+else
+    warn "rjsmin no se pudo verificar, intentando reinstalación..."
+    sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install --force-reinstall rjsmin
 fi
 
 # Verificar instalación de Python
