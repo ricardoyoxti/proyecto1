@@ -95,27 +95,27 @@ jobs:
 
     - name: 🔥 Create firewall rules
       run: |
-        # Regla para Odoo (puerto 8072)
+        # Regla para Odoo (puerto 8069)
         gcloud compute firewall-rules create allow-odoo-${{ github.run_number }} \
           --project=${{ env.PROJECT_ID }} \
           --direction=INGRESS \
           --priority=1000 \
           --network=default \
           --action=ALLOW \
-          --rules=tcp:8072 \
+          --rules=tcp:8069 \
           --source-ranges=0.0.0.0/0 \
           --target-tags=odoo-server \
-          --description="Allow Odoo access on port 8072" || \
+          --description="Allow Odoo access on port 8069" || \
         gcloud compute firewall-rules create allow-odoo \
           --project=${{ env.PROJECT_ID }} \
           --direction=INGRESS \
           --priority=1000 \
           --network=default \
           --action=ALLOW \
-          --rules=tcp:8072 \
+          --rules=tcp:8069 \
           --source-ranges=0.0.0.0/0 \
           --target-tags=odoo-server \
-          --description="Allow Odoo access on port 8072" || echo "Firewall rule already exists"
+          --description="Allow Odoo access on port 8069" || echo "Firewall rule already exists"
         
         # Regla para SSH (si no existe)
         gcloud compute firewall-rules create allow-ssh \
@@ -152,7 +152,7 @@ jobs:
         
         echo ""
         echo "🔗 URLs de acceso:"
-        echo "Odoo: http://$EXTERNAL_IP:8072"
+        echo "Odoo: http://$EXTERNAL_IP:8069"
         echo "SSH: gcloud compute ssh $INSTANCE_NAME --zone=${{ github.event.inputs.zone }}"
         
         echo ""
