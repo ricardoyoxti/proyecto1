@@ -285,7 +285,6 @@ if ! sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install \
         "XlsxWriter"
         "xlwt"
         "zeep"
-        "rjsmin"
     )
     
     for dep in "${CRITICAL_DEPS[@]}"; do
