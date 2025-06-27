@@ -272,6 +272,11 @@ if ! sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install \
         log "Instalando $dep..."
         sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install "$dep" || warn "Falló la instalación de $dep"
     done
+    
+    # Instalar lxml_html_clean si no está en requirements.txt
+    log "📦 Instalando lxml_html_clean..."
+    sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install lxml_html_clean || warn "Falló la instalación de lxml_html_clean"
+    
 fi
 
 # Verificar instalación de Python
