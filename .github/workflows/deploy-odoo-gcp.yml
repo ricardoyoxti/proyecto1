@@ -65,6 +65,17 @@ jobs:
         echo "BASE_NAME=$BASE_NAME" >> $GITHUB_OUTPUT
         echo "🏗️ Nombre de instancia generado: $INSTANCE_NAME"
 
+    # SOLUCIÓN 1: Subir el archivo startup-script.sh a un bucket de GCS
+    - name: 📤 Upload startup script to GCS bucket
+      run: |
+        # Crear bucket temporal si no existe (opcional)
+        BUCKET_NAME="${{ env.PROJECT_ID }}-startup-scripts"
+        gsutil mb gs://$BUCKET_NAME 2>/dev/null || echo "Bucket already exists or cannot be created"
+        
+        # Subir el archivo startup-script.sh
+        gsutil cp startup-script.sh gs://$BUCKET_NAME/startup-script-${{ github.run_number }}.sh
+        echo "STARTUP_SCRIPT_URL=gs://$BUCKET_NAME/startup-script-${{ github.run_number }}.sh" >> $GITHUB_ENV
+
     - name: 🖥️ Create VM Instance
       run: |
         INSTANCE_NAME="${{ steps.generate_name.outputs.INSTANCE_NAME }}"
@@ -90,8 +101,7 @@ jobs:
           --shielded-integrity-monitoring \
           --labels=environment=production,application=odoo,created-by=github-actions \
           --reservation-affinity=any \
-          --metadata-from-file startup-script=startup-script.sh \
-          --metadata instance-name=$INSTANCE_NAME,deployment-time=$(date -u +"%Y-%m-%dT%H:%M:%SZ"),github-actor=${{ github.actor }}
+          --metadata=startup-script-url=${{ env.STARTUP_SCRIPT_URL }},instance-name=$INSTANCE_NAME,deployment-time=$(date -u +"%Y-%m-%dT%H:%M:%SZ"),github-actor=${{ github.actor }}
 
     - name: 🔥 Create firewall rules
       run: |
@@ -165,3 +175,9 @@ jobs:
         echo ""
         echo "🗑️ Para eliminar la instancia:"
         echo "gcloud compute instances delete $INSTANCE_NAME --zone=${{ github.event.inputs.zone }}"
+
+    - name: 🧹 Cleanup startup script from GCS
+      if: always()
+      run: |
+        # Limpiar el archivo temporal del bucket
+        gsutil rm ${{ env.STARTUP_SCRIPT_URL }} || echo "No se pudo eliminar el archivo temporal"
