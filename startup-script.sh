@@ -27,7 +27,7 @@ ODOO_VERSION="18.0"
 ODOO_USER="odoo"
 ODOO_HOME="/opt/odoo"
 ODOO_CONFIG="/etc/odoo/odoo.conf"
-ODOO_PORT="8069"
+ODOO_PORT="8072"
 POSTGRES_USER="odoo"
 POSTGRES_DB="odoo"
 POSTGRES_PASSWORD="odoo123"
@@ -59,7 +59,7 @@ log "📦 Actualizando sistema..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y && apt-get upgrade -y
 
-# Instalar dependencias completas del sistema
+# Instalar dependencias completas del sistema incluyendo OpenSSL
 log "🔧 Instalando dependencias del sistema..."
 apt-get install -y \
     wget git curl unzip python3 python3-venv python3-pip python3-dev \
@@ -69,7 +69,18 @@ apt-get install -y \
     build-essential libssl-dev libffi-dev libbz2-dev libreadline-dev libsqlite3-dev \
     libncurses5-dev libncursesw5-dev xz-utils tk-dev libgdbm-dev libc6-dev \
     libnss3-dev libpython3-dev python3-wheel python3-setuptools ca-certificates \
-    librust-openssl-dev pkg-config software-properties-common lsb-release
+    librust-openssl-dev pkg-config software-properties-common lsb-release \
+    openssl libssl3 libcrypto++8
+
+# Verificar instalación de OpenSSL
+log "🔐 Verificando instalación de OpenSSL..."
+if command_exists openssl; then
+    OPENSSL_VERSION=$(openssl version)
+    log "✅ OpenSSL instalado: $OPENSSL_VERSION"
+else
+    error "OpenSSL no se instaló correctamente"
+    exit 1
+fi
 
 # Instalar PostgreSQL con mejor configuración
 log "🐘 Instalando PostgreSQL..."
@@ -212,7 +223,14 @@ chown -R $ODOO_USER:$ODOO_USER "$ODOO_HOME/venv"
 log "📦 Actualizando herramientas de Python..."
 sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install --upgrade pip setuptools wheel
 
-# Instalar psycopg2-binary primero
+# Instalar dependencias críticas primero
+log "🔐 Instalando dependencias de OpenSSL y criptografía..."
+sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install --upgrade \
+    pyOpenSSL \
+    cryptography \
+    cffi
+
+# Instalar psycopg2-binary
 log "🐘 Instalando psycopg2-binary..."
 sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install psycopg2-binary
 
@@ -231,7 +249,8 @@ if ! sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install \
     CRITICAL_DEPS=(
         "Babel>=2.6.0"
         "chardet"
-        "cryptography"
+        "cryptography>=3.4.8"
+        "pyOpenSSL>=22.0.0"
         "decorator"
         "docutils"
         "freezegun"
@@ -276,6 +295,16 @@ if ! sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install \
     # Instalar lxml_html_clean si no está en requirements.txt
     log "📦 Instalando lxml_html_clean..."
     sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install lxml_html_clean || warn "Falló la instalación de lxml_html_clean"
+
+fi
+
+# Verificar instalación de OpenSSL en Python
+log "🔍 Verificando instalación de OpenSSL en Python..."
+if sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/python" -c "import OpenSSL; print('OpenSSL version:', OpenSSL.__version__)" 2>/dev/null; then
+    log "✅ pyOpenSSL instalado correctamente"
+else
+    warn "Problema con pyOpenSSL, reintentando instalación..."
+    sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/pip" install --force-reinstall pyOpenSSL cryptography
 fi
 
 # Verificar instalación de Python
@@ -502,6 +531,10 @@ df -h /
 
 echo -e "\n=== Memoria del sistema ==="
 free -h
+
+echo -e "\n=== Verificación de OpenSSL ==="
+openssl version
+sudo -u $ODOO_USER "$ODOO_HOME/venv/bin/python" -c "import OpenSSL; print('pyOpenSSL version:', OpenSSL.__version__)" 2>/dev/null || echo "Error verificando pyOpenSSL"
 
 echo -e "\n=== Últimas líneas del log de Odoo ==="
 if [ -f /var/log/odoo/odoo.log ]; then
