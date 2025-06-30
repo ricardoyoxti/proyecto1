@@ -48,12 +48,16 @@ jobs:
     - name: ☁️ Set up Cloud SDK
       uses: google-github-actions/setup-gcloud@v1
 
-    - name: 🏷️ Generate instance name
+    - name: 🏷️ Generate instance name and firewall rules
       id: generate_name
       run: |
         BASE_NAME="${{ github.event.inputs.instance_name }}"
         TIMESTAMP=$(date +%Y%m%d-%H%M%S)
         INSTANCE_NAME="${BASE_NAME}-${TIMESTAMP}"
+        
+        # Generar nombres únicos para las reglas de firewall
+        FIREWALL_ODOO="allow-odoo-${TIMESTAMP}-${{ github.run_number }}"
+        FIREWALL_SSH="allow-ssh-${TIMESTAMP}-${{ github.run_number }}"
         
         # Validar nombre de instancia (solo letras minúsculas, números y guiones)
         if [[ ! $INSTANCE_NAME =~ ^[a-z0-9-]+$ ]]; then
@@ -63,7 +67,10 @@ jobs:
         
         echo "INSTANCE_NAME=$INSTANCE_NAME" >> $GITHUB_OUTPUT
         echo "BASE_NAME=$BASE_NAME" >> $GITHUB_OUTPUT
+        echo "FIREWALL_ODOO=$FIREWALL_ODOO" >> $GITHUB_OUTPUT
+        echo "FIREWALL_SSH=$FIREWALL_SSH" >> $GITHUB_OUTPUT
         echo "🏗️ Nombre de instancia generado: $INSTANCE_NAME"
+        echo "🔥 Reglas de firewall: $FIREWALL_ODOO, $FIREWALL_SSH"
 
     # SOLUCIÓN 1: Subir el archivo startup-script.sh a un bucket de GCS
     - name: 📤 Upload startup script to GCS bucket
@@ -99,36 +106,29 @@ jobs:
           --no-shielded-secure-boot \
           --shielded-vtpm \
           --shielded-integrity-monitoring \
-          --labels=environment=production,application=odoo,created-by=github-actions \
+          --labels=environment=production,application=odoo18,created-by=github-actions \
           --reservation-affinity=any \
           --metadata=startup-script-url=${{ env.STARTUP_SCRIPT_URL }},instance-name=$INSTANCE_NAME,deployment-time=$(date -u +"%Y-%m-%dT%H:%M:%SZ"),github-actor=${{ github.actor }}
 
-    - name: 🔥 Create firewall rules
+    - name: 🔥 Create firewall rules with unique names
       run: |
-        # Regla para Odoo (puerto 8069)
-        gcloud compute firewall-rules create allow-odoo-${{ github.run_number }} \
-          --project=${{ env.PROJECT_ID }} \
-          --direction=INGRESS \
-          --priority=1000 \
-          --network=default \
-          --action=ALLOW \
-          --rules=tcp:8069 \
-          --source-ranges=0.0.0.0/0 \
-          --target-tags=odoo-server \
-          --description="Allow Odoo access on port 8069" || \
-        gcloud compute firewall-rules create allow-odoo \
-          --project=${{ env.PROJECT_ID }} \
-          --direction=INGRESS \
-          --priority=1000 \
-          --network=default \
-          --action=ALLOW \
-          --rules=tcp:8069 \
-          --source-ranges=0.0.0.0/0 \
-          --target-tags=odoo-server \
-          --description="Allow Odoo access on port 8069" || echo "Firewall rule already exists"
+        FIREWALL_ODOO="${{ steps.generate_name.outputs.FIREWALL_ODOO }}"
+        FIREWALL_SSH="${{ steps.generate_name.outputs.FIREWALL_SSH }}"
         
-        # Regla para SSH (si no existe)
-        gcloud compute firewall-rules create allow-ssh \
+        echo "🔥 Creando regla de firewall para Odoo: $FIREWALL_ODOO"
+        gcloud compute firewall-rules create $FIREWALL_ODOO \
+          --project=${{ env.PROJECT_ID }} \
+          --direction=INGRESS \
+          --priority=1000 \
+          --network=default \
+          --action=ALLOW \
+          --rules=tcp:8069 \
+          --source-ranges=0.0.0.0/0 \
+          --target-tags=odoo-server \
+          --description="Allow Odoo 18 access on port 8069 - Created by GitHub Actions run ${{ github.run_number }}"
+        
+        echo "🔒 Creando regla de firewall para SSH: $FIREWALL_SSH"
+        gcloud compute firewall-rules create $FIREWALL_SSH \
           --project=${{ env.PROJECT_ID }} \
           --direction=INGRESS \
           --priority=1000 \
@@ -137,11 +137,16 @@ jobs:
           --rules=tcp:22 \
           --source-ranges=0.0.0.0/0 \
           --target-tags=odoo-server \
-          --description="Allow SSH access" || echo "SSH firewall rule already exists"
+          --description="Allow SSH access for Odoo server - Created by GitHub Actions run ${{ github.run_number }}"
+        
+        echo "✅ Reglas de firewall creadas exitosamente"
 
     - name: 📊 Get instance details
       run: |
         INSTANCE_NAME="${{ steps.generate_name.outputs.INSTANCE_NAME }}"
+        FIREWALL_ODOO="${{ steps.generate_name.outputs.FIREWALL_ODOO }}"
+        FIREWALL_SSH="${{ steps.generate_name.outputs.FIREWALL_SSH }}"
+        
         echo "🎉 Instancia creada exitosamente!"
         echo "📍 Detalles de la instancia:"
         gcloud compute instances describe $INSTANCE_NAME \
@@ -159,22 +164,25 @@ jobs:
         echo "Nombre base: ${{ steps.generate_name.outputs.BASE_NAME }}"
         echo "Desplegado por: ${{ github.actor }}"
         echo "Fecha: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+        echo "Reglas de firewall: $FIREWALL_ODOO, $FIREWALL_SSH"
         
         echo ""
         echo "🔗 URLs de acceso:"
-        echo "Odoo: http://$EXTERNAL_IP:8069"
+        echo "Odoo 18: http://$EXTERNAL_IP:8069"
         echo "SSH: gcloud compute ssh $INSTANCE_NAME --zone=${{ github.event.inputs.zone }}"
         
         echo ""
-        echo "⏳ La instalación de Odoo puede tardar entre 5-10 minutos después de que la instancia esté ejecutándose."
+        echo "⏳ La instalación de Odoo 18 puede tardar entre 5-10 minutos después de que la instancia esté ejecutándose."
         echo "📋 Credenciales por defecto:"
         echo "  - Database: odoo"
         echo "  - User: admin"
         echo "  - Password: admin"
         
         echo ""
-        echo "🗑️ Para eliminar la instancia:"
+        echo "🗑️ Para eliminar la instancia y reglas de firewall:"
         echo "gcloud compute instances delete $INSTANCE_NAME --zone=${{ github.event.inputs.zone }}"
+        echo "gcloud compute firewall-rules delete $FIREWALL_ODOO"
+        echo "gcloud compute firewall-rules delete $FIREWALL_SSH"
 
     - name: 🧹 Cleanup startup script from GCS
       if: always()
